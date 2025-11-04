@@ -14,7 +14,7 @@ pip install -e .  # необязательно, можно запускать н
 
 ## Использование
 
-1. Скачайте список рецептов с помощью утилиты (по умолчанию он фильтруется по товарам, представленным на базаре). Она обращается к `https://api.hypixel.net/resources/skyblock/collections`, извлекает из коллекций раздел `recipes` и нормализует ингредиенты:
+1. Скачайте список рецептов с помощью утилиты (по умолчанию он фильтруется по товарам, представленным на базаре). Она обращается к [документированному ресурсу `GET /resources/skyblock/items`](https://api.hypixel.net/#tag/Resources/paths/~1resources~1skyblock~1items/get), извлекает рецепты из описаний предметов и нормализует ингредиенты:
 
    ```bash
    python -m bazaar_analysis.cli fetch-recipes --output recipes.json

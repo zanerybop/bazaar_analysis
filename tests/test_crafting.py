@@ -93,20 +93,24 @@ def test_cli_fetch_recipes_writes_filtered_file(tmp_path, monkeypatch, hypixel_p
     }
 
 
-def test_hypixel_recipe_client_flattens_collections(monkeypatch, hypixel_payload):
+def test_hypixel_recipe_client_extracts_from_items_payload(monkeypatch):
     payload = {
-        "collections": {
-            "FARMING": {
-                "CARROT": {
-                    "recipes": [hypixel_payload[0]],
-                }
+        "items": [
+            {
+                "id": "ENCHANTED_CARROT",
+                "recipe": {
+                    "inputs": [
+                        {"itemId": "CARROT_ITEM", "amount": 160},
+                    ]
+                },
             },
-            "COMBAT": {
-                "PORK": {
-                    "recipes": [hypixel_payload[1]],
-                }
+            {
+                "id": "ENCHANTED_PORK",
+                "recipe": [
+                    {"item": "PORK", "count": 160},
+                ],
             },
-        }
+        ]
     }
 
     client = HypixelRecipeClient()

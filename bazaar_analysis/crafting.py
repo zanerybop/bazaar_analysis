@@ -303,15 +303,15 @@ class CraftRepository:
 class HypixelRecipeClient:
     """Fetcher for Hypixel SkyBlock recipe data."""
 
-    RECIPES_URL = "https://api.hypixel.net/resources/skyblock/collections"
+    ITEMS_URL = "https://api.hypixel.net/resources/skyblock/items"
 
     def __init__(self, api_url: str | None = None, *, timeout: int = 30, api_key: str | None = None) -> None:
-        self.api_url = api_url or self.RECIPES_URL
+        self.api_url = api_url or self.ITEMS_URL
         self.timeout = timeout
         self.api_key = api_key or os.environ.get("HYPIXEL_API_KEY")
 
     def fetch_raw(self) -> Mapping[str, object]:
-        """Fetch the raw collections payload from the API."""
+        """Fetch the raw recipes payload from the API."""
 
         headers = {"User-Agent": "bazaar-analysis/1.0"}
         if self.api_key:
@@ -326,43 +326,82 @@ class HypixelRecipeClient:
         except urllib.error.URLError as exc:  # pragma: no cover - network failure path
             raise RuntimeError(f"Unable to contact recipes API: {exc}") from exc
 
-        if isinstance(payload, Mapping):
-            return payload
-        return {"collections": payload}
+        if not isinstance(payload, Mapping):
+            raise RuntimeError("Unexpected response from items API")
+
+        if payload.get("success") is False:
+            raise RuntimeError("Hypixel API reported an error while fetching items")
+
+        return payload
 
     def fetch_repository(self) -> CraftRepository:
         """Fetch recipes and return them as a :class:`CraftRepository`."""
 
         payload = self.fetch_raw()
-        collections = payload.get("collections") if isinstance(payload, Mapping) else None
 
-        recipes: List[Mapping[str, object]] = []
-        if isinstance(collections, Mapping):
-            for category in collections.values():
-                if not isinstance(category, Mapping):
-                    continue
-                for entry in category.values():
-                    if not isinstance(entry, Mapping):
-                        continue
-                    raw_recipes = entry.get("recipes")
-                    if not isinstance(raw_recipes, Sequence):
-                        continue
-                    for recipe in raw_recipes:
-                        if isinstance(recipe, Mapping):
-                            recipes.append(recipe)
+        items_payload = payload.get("items")
 
-        if not recipes and isinstance(payload, Mapping):
-            fallback = payload.get("recipes", payload)
-            if isinstance(fallback, Sequence):
-                recipes.extend(entry for entry in fallback if isinstance(entry, Mapping))
-            elif isinstance(fallback, Mapping):
-                recipes.extend(
-                    entry for entry in fallback.values() if isinstance(entry, Mapping)
-                )
+        if isinstance(items_payload, Mapping):
+            items_iterable = items_payload.values()
+        elif isinstance(items_payload, Sequence):
+            items_iterable = items_payload
+        else:
+            items_iterable = []
 
-        return CraftRepository.from_hypixel_payload(recipes)
+        recipe_entries: List[Mapping[str, object]] = []
+        for item in items_iterable:
+            if not isinstance(item, Mapping):
+                continue
+
+            recipe_entry = self._build_recipe_entry(item)
+            if recipe_entry:
+                recipe_entries.append(recipe_entry)
+
+        return CraftRepository.from_hypixel_payload(recipe_entries)
 
     def fetch_recipes(self) -> List[CraftRecipe]:
         """Fetch recipes and return them as a list."""
 
         return list(self.fetch_repository())
+
+    @staticmethod
+    def _build_recipe_entry(item: Mapping[str, object]) -> Mapping[str, object] | None:
+        """Merge item metadata with its recipe definition."""
+
+        recipe = item.get("recipe")
+        if recipe is None:
+            return None
+
+        entry: Dict[str, object]
+        if isinstance(recipe, Mapping):
+            entry = dict(recipe)
+        elif isinstance(recipe, Sequence):
+            entry = {"ingredients": list(recipe)}
+        else:
+            return None
+
+        if not any(
+            key in entry for key in ("output", "result", "output_item", "outputItem", "output_item_id")
+        ):
+            product_id = CraftRepository._coerce_product_id(
+                item.get("id")
+                or item.get("item_id")
+                or item.get("itemId")
+                or item.get("name")
+            )
+            if not product_id:
+                return None
+
+            amount = CraftRepository._coerce_int(
+                entry.get("count")
+                or entry.get("output_amount")
+                or entry.get("amount")
+                or item.get("count")
+                or 1,
+                default=1,
+            )
+
+            entry = dict(entry)
+            entry["output"] = {"itemId": product_id, "amount": amount}
+
+        return entry
