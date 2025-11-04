@@ -6,7 +6,12 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from bazaar_analysis.crafting import CraftIngredient, CraftRecipe, CraftRepository
+from bazaar_analysis.crafting import (
+    CraftIngredient,
+    CraftRecipe,
+    CraftRepository,
+    HypixelRecipeClient,
+)
 from bazaar_analysis import cli
 
 
@@ -86,3 +91,29 @@ def test_cli_fetch_recipes_writes_filtered_file(tmp_path, monkeypatch, hypixel_p
             },
         ]
     }
+
+
+def test_hypixel_recipe_client_flattens_collections(monkeypatch, hypixel_payload):
+    payload = {
+        "collections": {
+            "FARMING": {
+                "CARROT": {
+                    "recipes": [hypixel_payload[0]],
+                }
+            },
+            "COMBAT": {
+                "PORK": {
+                    "recipes": [hypixel_payload[1]],
+                }
+            },
+        }
+    }
+
+    client = HypixelRecipeClient()
+    monkeypatch.setattr(client, "fetch_raw", lambda: payload)
+
+    repository = client.fetch_repository()
+    assert list(repository) == [
+        CraftRecipe("ENCHANTED_CARROT", 1, [CraftIngredient("CARROT_ITEM", 160)]),
+        CraftRecipe("ENCHANTED_PORK", 1, [CraftIngredient("PORK", 160)]),
+    ]

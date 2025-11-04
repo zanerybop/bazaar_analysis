@@ -301,9 +301,9 @@ class CraftRepository:
 
 
 class HypixelRecipeClient:
-    """Fetcher for the Hypixel SkyBlock recipes API."""
+    """Fetcher for Hypixel SkyBlock recipe data."""
 
-    RECIPES_URL = "https://api.hypixel.net/resources/skyblock/recipes"
+    RECIPES_URL = "https://api.hypixel.net/resources/skyblock/collections"
 
     def __init__(self, api_url: str | None = None, *, timeout: int = 30, api_key: str | None = None) -> None:
         self.api_url = api_url or self.RECIPES_URL
@@ -311,7 +311,7 @@ class HypixelRecipeClient:
         self.api_key = api_key or os.environ.get("HYPIXEL_API_KEY")
 
     def fetch_raw(self) -> Mapping[str, object]:
-        """Fetch the raw recipes payload from the API."""
+        """Fetch the raw collections payload from the API."""
 
         headers = {"User-Agent": "bazaar-analysis/1.0"}
         if self.api_key:
@@ -328,13 +328,38 @@ class HypixelRecipeClient:
 
         if isinstance(payload, Mapping):
             return payload
-        return {"recipes": payload}
+        return {"collections": payload}
 
     def fetch_repository(self) -> CraftRepository:
         """Fetch recipes and return them as a :class:`CraftRepository`."""
 
         payload = self.fetch_raw()
-        recipes = payload.get("recipes", payload)
+        collections = payload.get("collections") if isinstance(payload, Mapping) else None
+
+        recipes: List[Mapping[str, object]] = []
+        if isinstance(collections, Mapping):
+            for category in collections.values():
+                if not isinstance(category, Mapping):
+                    continue
+                for entry in category.values():
+                    if not isinstance(entry, Mapping):
+                        continue
+                    raw_recipes = entry.get("recipes")
+                    if not isinstance(raw_recipes, Sequence):
+                        continue
+                    for recipe in raw_recipes:
+                        if isinstance(recipe, Mapping):
+                            recipes.append(recipe)
+
+        if not recipes and isinstance(payload, Mapping):
+            fallback = payload.get("recipes", payload)
+            if isinstance(fallback, Sequence):
+                recipes.extend(entry for entry in fallback if isinstance(entry, Mapping))
+            elif isinstance(fallback, Mapping):
+                recipes.extend(
+                    entry for entry in fallback.values() if isinstance(entry, Mapping)
+                )
+
         return CraftRepository.from_hypixel_payload(recipes)
 
     def fetch_recipes(self) -> List[CraftRecipe]:
