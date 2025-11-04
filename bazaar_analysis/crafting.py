@@ -303,105 +303,78 @@ class CraftRepository:
 class HypixelRecipeClient:
     """Fetcher for Hypixel SkyBlock recipe data."""
 
-    ITEMS_URL = "https://api.hypixel.net/resources/skyblock/items"
+    RECIPES_URL = "https://api.hypixel.net/resources/skyblock/recipes"
+    FALLBACK_URLS: tuple[str, ...] = (
+        "https://raw.githubusercontent.com/HypixelDev/PublicAPI/master/SkyBlock/recipes.json",
+    )
 
-    def __init__(self, api_url: str | None = None, *, timeout: int = 30, api_key: str | None = None) -> None:
-        self.api_url = api_url or self.ITEMS_URL
+    def __init__(
+        self,
+        api_url: str | None = None,
+        *,
+        timeout: int = 30,
+        api_key: str | None = None,
+        fallback_urls: Iterable[str] | None = None,
+    ) -> None:
+        self.api_url = api_url or self.RECIPES_URL
         self.timeout = timeout
         self.api_key = api_key or os.environ.get("HYPIXEL_API_KEY")
+        self.fallback_urls = list(fallback_urls) if fallback_urls is not None else list(self.FALLBACK_URLS)
 
-    def fetch_raw(self) -> Mapping[str, object]:
-        """Fetch the raw recipes payload from the API."""
-
+    def _fetch(self, url: str) -> Mapping[str, object]:
         headers = {"User-Agent": "bazaar-analysis/1.0"}
         if self.api_key:
             headers["API-Key"] = self.api_key
 
-        request = urllib.request.Request(self.api_url, headers=headers)
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                payload = json.load(response)
-        except urllib.error.HTTPError as exc:  # pragma: no cover - network failure path
-            raise RuntimeError(f"Failed to fetch recipes data: {exc}") from exc
-        except urllib.error.URLError as exc:  # pragma: no cover - network failure path
-            raise RuntimeError(f"Unable to contact recipes API: {exc}") from exc
+        request = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            payload = json.load(response)
 
         if not isinstance(payload, Mapping):
-            raise RuntimeError("Unexpected response from items API")
+            raise RuntimeError("Unexpected response from recipes API")
 
         if payload.get("success") is False:
-            raise RuntimeError("Hypixel API reported an error while fetching items")
+            cause = payload.get("cause")
+            if cause:
+                raise RuntimeError(f"Hypixel API reported an error while fetching recipes: {cause}")
+            raise RuntimeError("Hypixel API reported an error while fetching recipes")
 
         return payload
+
+    def fetch_raw(self) -> Mapping[str, object]:
+        """Fetch the raw recipes payload, trying fallbacks as needed."""
+
+        errors: list[str] = []
+        urls = [self.api_url, *self.fallback_urls]
+        for url in urls:
+            try:
+                return self._fetch(url)
+            except (urllib.error.HTTPError, urllib.error.URLError) as exc:
+                errors.append(f"{url}: {exc}")
+            except RuntimeError as exc:
+                errors.append(f"{url}: {exc}")
+
+        raise RuntimeError(
+            "Failed to fetch recipes data from all sources: " + "; ".join(errors)
+        )
 
     def fetch_repository(self) -> CraftRepository:
         """Fetch recipes and return them as a :class:`CraftRepository`."""
 
         payload = self.fetch_raw()
 
-        items_payload = payload.get("items")
+        recipes_payload = payload.get("recipes")
 
-        if isinstance(items_payload, Mapping):
-            items_iterable = items_payload.values()
-        elif isinstance(items_payload, Sequence):
-            items_iterable = items_payload
+        if isinstance(recipes_payload, Mapping):
+            recipes_iterable = [entry for entry in recipes_payload.values() if isinstance(entry, Mapping)]
+        elif isinstance(recipes_payload, Sequence):
+            recipes_iterable = [entry for entry in recipes_payload if isinstance(entry, Mapping)]
         else:
-            items_iterable = []
+            recipes_iterable = []
 
-        recipe_entries: List[Mapping[str, object]] = []
-        for item in items_iterable:
-            if not isinstance(item, Mapping):
-                continue
-
-            recipe_entry = self._build_recipe_entry(item)
-            if recipe_entry:
-                recipe_entries.append(recipe_entry)
-
-        return CraftRepository.from_hypixel_payload(recipe_entries)
+        return CraftRepository.from_hypixel_payload(recipes_iterable)
 
     def fetch_recipes(self) -> List[CraftRecipe]:
         """Fetch recipes and return them as a list."""
 
         return list(self.fetch_repository())
-
-    @staticmethod
-    def _build_recipe_entry(item: Mapping[str, object]) -> Mapping[str, object] | None:
-        """Merge item metadata with its recipe definition."""
-
-        recipe = item.get("recipe")
-        if recipe is None:
-            return None
-
-        entry: Dict[str, object]
-        if isinstance(recipe, Mapping):
-            entry = dict(recipe)
-        elif isinstance(recipe, Sequence):
-            entry = {"ingredients": list(recipe)}
-        else:
-            return None
-
-        if not any(
-            key in entry for key in ("output", "result", "output_item", "outputItem", "output_item_id")
-        ):
-            product_id = CraftRepository._coerce_product_id(
-                item.get("id")
-                or item.get("item_id")
-                or item.get("itemId")
-                or item.get("name")
-            )
-            if not product_id:
-                return None
-
-            amount = CraftRepository._coerce_int(
-                entry.get("count")
-                or entry.get("output_amount")
-                or entry.get("amount")
-                or item.get("count")
-                or 1,
-                default=1,
-            )
-
-            entry = dict(entry)
-            entry["output"] = {"itemId": product_id, "amount": amount}
-
-        return entry

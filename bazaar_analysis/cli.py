@@ -78,6 +78,17 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="Include all recipes even if the product is not sold on the bazaar",
     )
+    fetch_parser.add_argument(
+        "--recipes-api-url",
+        type=str,
+        help="Override the primary recipes API endpoint",
+    )
+    fetch_parser.add_argument(
+        "--recipes-fallback-url",
+        action="append",
+        default=None,
+        help="Additional fallback URLs to try if the primary endpoint fails",
+    )
 
     return parser.parse_args(argv)
 
@@ -120,7 +131,11 @@ def handle_analyze(args: argparse.Namespace) -> int:
 
 
 def handle_fetch_recipes(args: argparse.Namespace) -> int:
-    client = HypixelRecipeClient(api_key=args.api_key)
+    client = HypixelRecipeClient(
+        api_url=args.recipes_api_url,
+        api_key=args.api_key,
+        fallback_urls=args.recipes_fallback_url,
+    )
     try:
         repository = client.fetch_repository()
     except RuntimeError as exc:

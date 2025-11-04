@@ -1,6 +1,9 @@
-from pathlib import Path
 import json
 import sys
+import threading
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 import pytest
 
@@ -13,6 +16,31 @@ from bazaar_analysis.crafting import (
     HypixelRecipeClient,
 )
 from bazaar_analysis import cli
+
+
+@contextmanager
+def recipe_server(payload):
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = json.dumps(payload).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format, *args):  # pragma: no cover - quiet test server
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        host, port = server.server_address
+        yield f"http://{host}:{port}/recipes"
+    finally:
+        server.shutdown()
+        thread.join()
 
 
 @pytest.fixture
@@ -59,16 +87,24 @@ def test_from_hypixel_payload_handles_key_pattern():
     ]
 
 
-def test_cli_fetch_recipes_writes_filtered_file(tmp_path, monkeypatch, hypixel_payload):
-    class DummyClient:
-        def fetch_repository(self):
-            return CraftRepository.from_hypixel_payload(hypixel_payload)
-
-    monkeypatch.setattr(cli, "HypixelRecipeClient", lambda api_key=None: DummyClient())
-
+def test_cli_fetch_recipes_writes_filtered_file(tmp_path, hypixel_payload):
     output = tmp_path / "exports" / "recipes.json"
-    # include-all to avoid touching network for bazaar data
-    exit_code = cli.main(["fetch-recipes", "--output", str(output), "--include-all"])
+    payload = {"success": True, "recipes": {"A": hypixel_payload[0], "B": hypixel_payload[1]}}
+
+    with recipe_server(payload) as url:
+        exit_code = cli.main(
+            [
+                "fetch-recipes",
+                "--output",
+                str(output),
+                "--include-all",
+                "--recipes-api-url",
+                url,
+                "--recipes-fallback-url",
+                url,
+            ]
+        )
+
     assert exit_code == 0
 
     assert output.parent.is_dir()
@@ -93,24 +129,22 @@ def test_cli_fetch_recipes_writes_filtered_file(tmp_path, monkeypatch, hypixel_p
     }
 
 
-def test_hypixel_recipe_client_extracts_from_items_payload(monkeypatch):
+def test_hypixel_recipe_client_extracts_from_recipes_payload(monkeypatch):
     payload = {
-        "items": [
-            {
-                "id": "ENCHANTED_CARROT",
-                "recipe": {
-                    "inputs": [
-                        {"itemId": "CARROT_ITEM", "amount": 160},
-                    ]
-                },
+        "recipes": {
+            "ENCHANTED_CARROT": {
+                "output": {"itemId": "ENCHANTED_CARROT", "amount": 1},
+                "input": [
+                    {"itemId": "CARROT_ITEM", "amount": 160},
+                ],
             },
-            {
-                "id": "ENCHANTED_PORK",
-                "recipe": [
+            "ENCHANTED_PORK": {
+                "output": {"item": "ENCHANTED_PORK", "count": 1},
+                "ingredients": [
                     {"item": "PORK", "count": 160},
                 ],
             },
-        ]
+        }
     }
 
     client = HypixelRecipeClient()
@@ -118,6 +152,19 @@ def test_hypixel_recipe_client_extracts_from_items_payload(monkeypatch):
 
     repository = client.fetch_repository()
     assert list(repository) == [
+        CraftRecipe("ENCHANTED_CARROT", 1, [CraftIngredient("CARROT_ITEM", 160)]),
+        CraftRecipe("ENCHANTED_PORK", 1, [CraftIngredient("PORK", 160)]),
+    ]
+
+
+def test_hypixel_recipe_client_uses_fallback(hypixel_payload):
+    payload = {"success": True, "recipes": {"A": hypixel_payload[0], "B": hypixel_payload[1]}}
+
+    with recipe_server(payload) as url:
+        client = HypixelRecipeClient(api_url="http://127.0.0.1:1/invalid", fallback_urls=[url])
+        recipes = client.fetch_recipes()
+
+    assert recipes == [
         CraftRecipe("ENCHANTED_CARROT", 1, [CraftIngredient("CARROT_ITEM", 160)]),
         CraftRecipe("ENCHANTED_PORK", 1, [CraftIngredient("PORK", 160)]),
     ]
