@@ -1,0 +1,40 @@
+{
+  "recipes": [
+    {
+      "product_id": "ENCHANTED_SUGAR",
+      "output_amount": 1,
+      "ingredients": [
+        {"product_id": "SUGAR_CANE", "amount": 160}
+      ]
+    },
+    {
+      "product_id": "ENCHANTED_SUGAR_CANE",
+      "output_amount": 1,
+      "ingredients": [
+        {"product_id": "ENCHANTED_SUGAR", "amount": 16}
+      ]
+    },
+    {
+      "product_id": "ENCHANTED_COCOA_BEANS",
+      "output_amount": 1,
+      "ingredients": [
+        {"product_id": "COCOA_BEANS", "amount": 160}
+      ]
+    },
+    {
+      "product_id": "ENCHANTED_COOKIE",
+      "output_amount": 1,
+      "ingredients": [
+        {"product_id": "ENCHANTED_WHEAT", "amount": 32},
+        {"product_id": "ENCHANTED_COCOA_BEANS", "amount": 8}
+      ]
+    },
+    {
+      "product_id": "ENCHANTED_REDSTONE_BLOCK",
+      "output_amount": 1,
+      "ingredients": [
+        {"product_id": "ENCHANTED_REDSTONE", "amount": 160}
+      ]
+    }
+  ]
+}
